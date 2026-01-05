@@ -108,6 +108,7 @@ export default function PdfFormPage() {
   const [zoom, setZoom] = useState(1);
   const [currentPage, setCurrentPage] = useState(1);
   const [showFieldProperties, setShowFieldProperties] = useState(false);
+  const [savedCanvasState, setSavedCanvasState] = useState<string | null>(null);
 
   const loadPdfFromUrl = useCallback(async (url: string) => {
     setLoading(true);
@@ -182,6 +183,7 @@ export default function PdfFormPage() {
     setNumPages(0);
     setPreviewPdf(null);
     setShowPreview(false);
+    setSavedCanvasState(null); // Clear saved canvas state
     // Clear canvas
     if (canvas) {
       canvas.clear();
@@ -196,6 +198,18 @@ export default function PdfFormPage() {
     fabricCanvas.renderOnAddRemove = true;
     
     setCanvas(fabricCanvas);
+    
+    // Restore canvas state if available (when coming back from preview)
+    if (savedCanvasState && showPreview === false) {
+      try {
+        fabricCanvas.loadFromJSON(savedCanvasState, () => {
+          fabricCanvas.renderAll();
+          console.log('Canvas state restored from preview');
+        });
+      } catch (err) {
+        console.error('Error restoring canvas state:', err);
+      }
+    }
     
     // Listen for selection changes
     fabricCanvas.on('selection:created', (e: any) => {
@@ -222,7 +236,7 @@ export default function PdfFormPage() {
     fabricCanvas.on('object:added', (e: any) => {
       console.log('Object added:', e.target.type, 'at', e.target.left, e.target.top);
     });
-  }, []);
+  }, [savedCanvasState, showPreview]);
 
   const handleSignatureSave = useCallback((dataUrl: string) => {
     setSignature(dataUrl);
@@ -663,6 +677,10 @@ export default function PdfFormPage() {
       toast.error('Please add some fields to the form');
       return;
     }
+
+    // Save canvas state before generating preview
+    const canvasState = JSON.stringify(canvas.toJSON());
+    setSavedCanvasState(canvasState);
 
     const loadingToast = toast.loading('Generating preview...');
 
@@ -1435,27 +1453,19 @@ export default function PdfFormPage() {
             <div className="flex flex-col sm:flex-row gap-4">
               <button
                 onClick={async () => {
-                  // Set loading state and clear preview
-                  setLoading(true);
+                  // Simply go back to edit mode and restore canvas state
                   setShowPreview(false);
-                  setPdfBytes(null);
                   
-                  // Re-fetch the PDF to avoid detached buffer issues
-                  try {
-                    if (pdfUrl.startsWith('http://') || pdfUrl.startsWith('https://')) {
-                      // Reload from URL
-                      const response = await fetch(pdfUrl);
-                      const bytes = await response.arrayBuffer();
-                      setPdfBytes(new Uint8Array(bytes));
-                    } else {
-                      // If it was uploaded, we can't reload it - just go back to preview
-                      setError('Cannot reload uploaded file. Please re-upload if needed.');
+                  // Restore canvas state if available
+                  if (savedCanvasState && canvas) {
+                    try {
+                      await canvas.loadFromJSON(savedCanvasState);
+                      canvas.renderAll();
+                      toast.success('Canvas restored successfully!');
+                    } catch (err) {
+                      console.error('Error restoring canvas:', err);
+                      toast.error('Failed to restore canvas state');
                     }
-                  } catch (err) {
-                    console.error('Error reloading PDF:', err);
-                    setError('Failed to reload PDF');
-                  } finally {
-                    setLoading(false);
                   }
                 }}
                 className="px-6 py-3 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-xl font-medium transition-all flex items-center gap-2"
